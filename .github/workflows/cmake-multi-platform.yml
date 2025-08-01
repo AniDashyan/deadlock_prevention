@@ -29,20 +29,30 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Set executable path
+        id: setpath
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            echo "EXE=./build/deadlock.exe" >> $GITHUB_ENV
+          else
+            echo "EXE=./build/deadlock" >> $GITHUB_ENV
+          fi
+        shell: bash
+
       - name: Run Method 1 (safe single access)
-        run: ./build/deadlock --method 1 --iters 1000
+        run: $EXE --method 1 --iters 1000
         shell: bash
 
       - name: Run Method 3 (scoped_lock)
-        run: ./build/deadlock --method 3 --iters 1000
+        run: $EXE --method 3 --iters 1000
         shell: bash
 
       - name: Run Method 4 (ordered lock)
-        run: ./build/deadlock --method 4 --iters 1000
+        run: $EXE --method 4 --iters 1000
         shell: bash
 
       - name: Run Method 2 (deadlock test)
         run: |
           echo "NOTE: Method 2 will demonstrate a deadlock and exit early."
-          timeout 3 ./build/deadlock --method 2 || echo "Expected deadlock triggered"
+          timeout 3 $EXE --method 2 || echo "Expected deadlock triggered"
         shell: bash
