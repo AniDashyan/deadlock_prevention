@@ -1,0 +1,48 @@
+name: CMake Multi-Platform Build & Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v1
+        with:
+          cmake-version: latest
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run Method 1 (safe single access)
+        run: ./build/deadlock --method 1 --iters 1000
+        shell: bash
+
+      - name: Run Method 3 (scoped_lock)
+        run: ./build/deadlock --method 3 --iters 1000
+        shell: bash
+
+      - name: Run Method 4 (ordered lock)
+        run: ./build/deadlock --method 4 --iters 1000
+        shell: bash
+
+      - name: Run Method 2 (deadlock test)
+        run: |
+          echo "NOTE: Method 2 will demonstrate a deadlock and exit early."
+          timeout 3 ./build/deadlock --method 2 || echo "Expected deadlock triggered"
+        shell: bash
