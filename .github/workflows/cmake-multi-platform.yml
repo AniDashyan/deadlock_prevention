@@ -1,58 +1,86 @@
-name: CMake Multi-Platform Build & Test
+name: CMake on Multiple Platforms
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ "main" ]
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
+        build_type: [Release]
+        c_compiler: [gcc, clang, cl]
+        include:
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+        exclude:
+          - os: windows-latest
+            c_compiler: gcc
+          - os: windows-latest
+            c_compiler: clang
+          - os: ubuntu-latest
+            c_compiler: cl
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up CMake
-        uses: jwlawson/actions-setup-cmake@v1
-        with:
-          cmake-version: latest
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
-      - name: Configure
-        run: cmake -S . -B build
+      - name: Configure CMake
+        shell: bash
+        run: cmake -B "${{ steps.strings.outputs.build-output-dir }}" \
+                   -DCMAKE_CXX_COMPILER="${{ matrix.cpp_compiler }}" \
+                   -DCMAKE_C_COMPILER="${{ matrix.c_compiler }}" \
+                   -DCMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+                   -S "${{ github.workspace }}"
 
       - name: Build
-        run: cmake --build build
+        shell: bash
+        run: cmake --build "${{ steps.strings.outputs.build-output-dir }}" --config "${{ matrix.build_type }}"
 
-      - name: Set executable path
-        id: setpath
+      - name: Run Executable with all methods
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        shell: bash
         run: |
-          if [[ "${{ matrix.os }}" == "Windows" ]]; then
-            echo "EXE=./build/deadlock.exe" >> $GITHUB_ENV
+          executable="deadlock"
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            executable_path="./${{ matrix.build_type }}/${executable}.exe"
           else
-            echo "EXE=./build/deadlock" >> $GITHUB_ENV
+            executable_path="./${executable}"
           fi
-        shell: bash
 
-      - name: Run Method 1 (safe single access)
-        run: $EXE --method 1 --iters 1000
-        shell: bash
+          if [ ! -f "$executable_path" ]; then
+            echo "Executable not found: $executable_path"
+            exit 1
+          fi
 
-      - name: Run Method 3 (scoped_lock)
-        run: $EXE --method 3 --iters 1000
-        shell: bash
+          echo "Running Method 1 (safe single access)"
+          "$executable_path" --method 1 --iters 1000
 
-      - name: Run Method 4 (ordered lock)
-        run: $EXE --method 4 --iters 1000
-        shell: bash
+          echo "Running Method 3 (scoped_lock)"
+          "$executable_path" --method 3 --iters 1000
 
-      - name: Run Method 2 (deadlock test)
-        run: |
-          echo "NOTE: Method 2 will demonstrate a deadlock and exit early."
-          timeout 3 $EXE --method 2 || echo "Expected deadlock triggered"
-        shell: bash
+          echo "Running Method 4 (ordered locks)"
+          "$executable_path" --method 4 --iters 1000
+
+          echo "Running Method 2 (expected deadlock)"
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            powershell -Command "Start-Process -NoNewWindow -FilePath '$executable_path' -ArgumentList '--method 2 --iters 1000'; Start-Sleep -Seconds 3; Stop-Process -Name deadlock -Force"
+          else
+            timeout 3 "$executable_path" --method 2 || echo "Deadlock simulation complete (timeout)"
+          fi
